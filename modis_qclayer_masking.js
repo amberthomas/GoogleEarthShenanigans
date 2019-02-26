@@ -26,11 +26,13 @@ var reducers = ee.Reducer.min().combine({
 });
 
 
+//stats_sample is the ROI used in the reducer, 
+//necessary b/c GEE caps the # of pixels you can use
+var stats_sample = ee.Geometry.Point([-100, 38]).buffer(100000);
 
 //this will get the min and max as an exploritory messure, 
 //just enter the band layer you want to analyze
-var stats = function(layer) {
-  var roi = ee.Geometry.Point([-100, 38]).buffer(100000);
+var stats = function(layer, roi) {
   var vals = layer.reduceRegion({
     geometry : roi,
     reducer: reducers,
@@ -47,7 +49,7 @@ var stats = function(layer) {
 var ndvi = image.select('NDVI');
 
 //run the stats
-stats(ndvi)
+stats(ndvi, stats_sample)
 
 // ndviVis is an object that defines some visualization parameters. 
 var ndviVis = {
@@ -60,36 +62,68 @@ var ndviVis = {
   ],
 };
 
-//quality layer 
+/*
+Quality Layer
+The first two bits of the DetailedQA layer contain general information about 
+the quality of the pixel. 0 - 2 means the pixel was produced with 0 as the highest
+quality and 2 representing a cloudy pixel. 3 means the pixel was not produced due 
+to reasons other than clouds.
+*/
+
+
+// Use the expression function to perform bitwise opperations on the image object
+// the expression we use here masks to select the first 2 bits
 var qcq = image.expression(
     '(QA & 3)', {
       'QA': image.select('DetailedQA'),
 });
 
-
+// We expect to have 4 integer codes representing quality
+// Please note that the in AND max values are inclusive 
 var qcqVis = {
   min: 0.0,
-  max: 4.0,
+  max: 3.0,
+  //notice that you can use hex codes as above to id colors or the name! 
+  //while the hex code offers you more shades, using the name gives you a defacto legend
   palette: [
-    'green', 'yellow', 'orange', 'red'
+    'green', 'yellow', 'purple', 'red'
   ],
 };
 
 
-//usefulness 
+/*
+Usefulness Layer
+The usefulness portion of the DetailedQA includes bits 2-5 (remember, in CS we index by 0
+so the first bit is called bit 0). This means we have 4 bits and 16 values to represent the
+usefulness of the pixel. 0 is the most useful and 12 is the least. Values 13-15 are not used,
+which is why I chose not to visualize this range. 
+*/
+
+//Breaking down the bit math:
+// 15 is represented in binary as 1111
+// we shift over by 2 bits so the mask becomes 111100
+// we then &, which means that any bits 2-5 in QA is selected by the mask
+// then shift the newly masked quality back 2 places so we have sensible min/max vals
 var qcu = image.expression(
     '(QA & (15 << 2))>>2', {
       'QA': image.select('DetailedQA'),
 });
 
-stats(qcu)
+stats(qcu, stats_sample)
+
+
+//Values 13-15 are not used, which is why I chose not to visualize this range 
+//(as you can see by the use of 12 as the max in visualization range, I clip the values).
 var qcuVis = {
   min: 0.0,
-  max: 11.0, //max is inclusive
+  max: 12.0, //max is inclusive
   palette: [
-    'aqua', 'blue', 'lime', 'green', 'fuchsia', 'yellow', 'orange', 'red', 'maroon', 'white','silver', 'black' 
+    'aqua', 'blue', 'lime', 'green', 'fuchsia', 'yellow', 
+    'orange', 'red', 'maroon', 'white','silver', 'grey', 'black' 
   ],
 };
+
+//Question: why did I chose to have 13 colors in my pallet? 
 
 
 //mixed clouds
@@ -109,8 +143,11 @@ var qccVis = {
 */
 
 Map.setCenter(-100, 38, 3.5)
+//Map.addLayer(qcc.clip(continentalUS), qccVis, 'QC Mixed Clouds');
+
 Map.addLayer(ndvi.clip(continentalUS), ndviVis, 'NDVI');
 Map.addLayer(qcq.clip(continentalUS), qcqVis, 'QC Quality');
 Map.addLayer(qcu.clip(continentalUS), qcuVis, 'QC Usefulness');
-Map.addLayer(ee.Geometry.Point([-100, 38]).buffer(100000))
-//Map.addLayer(qcc.clip(continentalUS), qccVis, 'QC Mixed Clouds');
+//this highlights the ROI I used to generate the min max reductions
+Map.addLayer(stats_sample, {}, 'Stats ROI')
+
